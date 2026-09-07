@@ -11,11 +11,16 @@ const client = new Client({
 
 const TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
+const STAFF_TEAM_ROLE_ID = process.env.STAFF_TEAM_ROLE_ID; // Nieuwe environment variable
 
-// Controleer of environment variables bestaan
+// Controleer of alle environment variables bestaan
 if (!TOKEN || !CLIENT_ID) {
     console.error('❌ DISCORD_TOKEN of CLIENT_ID is niet ingesteld in .env of Render environment variables!');
     process.exit(1);
+}
+
+if (!STAFF_TEAM_ROLE_ID) {
+    console.warn('⚠️ STAFF_TEAM_ROLE_ID is niet ingesteld. De bot zal geen Staff Team rol toevoegen.');
 }
 
 // Slash command registreren
@@ -48,6 +53,12 @@ client.once('ready', async () => {
     console.log(`✅ Bot is online als ${client.user.tag}`);
     console.log(`✅ Bot ID: ${client.user.id}`);
     console.log(`✅ Aantal servers: ${client.guilds.cache.size}`);
+    
+    if (STAFF_TEAM_ROLE_ID) {
+        console.log(`✅ Staff Team Role ID geladen: ${STAFF_TEAM_ROLE_ID}`);
+    } else {
+        console.warn('⚠️ Geen Staff Team Role ID ingesteld');
+    }
 
     try {
         console.log('🔄 Slash commands worden geregistreerd...');
@@ -96,10 +107,19 @@ client.on('interactionCreate', async (interaction) => {
         return interaction.editReply(`❌ Ik kan de rol **${role.name}** niet toevoegen omdat deze hoger of gelijk is aan mijn hoogste rol. Zet mijn rol hoger in de server.`);
     }
 
-    // Zoek de "Staff Team" rol (pas aan naar jouw rolnaam)
-    const staffTeamRole = interaction.guild.roles.cache.find(r => r.name === 'Staff Team');
-    if (!staffTeamRole) {
-        return interaction.editReply('❌ De rol **"Staff Team"** is niet gevonden. Maak deze eerst aan in de server instellingen.');
+    // Staff Team rol via environment variable
+    let staffTeamRole = null;
+    if (STAFF_TEAM_ROLE_ID) {
+        staffTeamRole = interaction.guild.roles.cache.get(STAFF_TEAM_ROLE_ID);
+        if (!staffTeamRole) {
+            return interaction.editReply(`❌ De Staff Team rol met ID \`${STAFF_TEAM_ROLE_ID}\` is niet gevonden. Controleer of het ID klopt.`);
+        }
+    } else {
+        // Fallback: zoek op naam als geen ID is ingesteld
+        staffTeamRole = interaction.guild.roles.cache.find(r => r.name === 'Staff Team');
+        if (!staffTeamRole) {
+            console.warn('⚠️ Staff Team rol niet gevonden op naam, en geen ID ingesteld in environment.');
+        }
     }
 
     try {
@@ -107,10 +127,12 @@ client.on('interactionCreate', async (interaction) => {
         await member.roles.add(role);
         console.log(`✅ Rol ${role.name} toegevoegd aan ${user.tag}`);
 
-        // Staff team rol toevoegen (als die nog niet heeft)
-        if (!member.roles.cache.has(staffTeamRole.id)) {
+        // Staff team rol toevoegen (als die bestaat en gebruiker heeft hem nog niet)
+        if (staffTeamRole && !member.roles.cache.has(staffTeamRole.id)) {
             await member.roles.add(staffTeamRole);
             console.log(`✅ Staff Team rol toegevoegd aan ${user.tag}`);
+        } else if (staffTeamRole && member.roles.cache.has(staffTeamRole.id)) {
+            console.log(`ℹ️ ${user.tag} heeft de Staff Team rol al.`);
         }
 
         // Embed maken voor mooie weergave
@@ -130,6 +152,13 @@ client.on('interactionCreate', async (interaction) => {
                 text: `Aangenomen door ${interaction.user.tag}`, 
                 iconURL: interaction.user.displayAvatarURL() 
             });
+
+        // Als staff team rol is toegevoegd, voeg toe aan embed
+        if (staffTeamRole && !member.roles.cache.has(staffTeamRole.id)) {
+            embed.addFields(
+                { name: '🎖️ Extra rol', value: `**${staffTeamRole.name}** toegevoegd`, inline: false }
+            );
+        }
 
         // Stuur embed naar het kanaal waar command gebruikt is
         await interaction.editReply({ embeds: [embed] });
