@@ -2,11 +2,21 @@ const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, EmbedBuild
 require('dotenv').config();
 
 const client = new Client({ 
-    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers] 
+    intents: [
+        GatewayIntentBits.Guilds, 
+        GatewayIntentBits.GuildMembers,
+        GatewayIntentBits.MessageContent
+    ] 
 });
 
 const TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
+
+// Controleer of environment variables bestaan
+if (!TOKEN || !CLIENT_ID) {
+    console.error('❌ DISCORD_TOKEN of CLIENT_ID is niet ingesteld in .env of Render environment variables!');
+    process.exit(1);
+}
 
 // Slash command registreren
 const commands = [
@@ -36,13 +46,16 @@ const rest = new REST({ version: '10' }).setToken(TOKEN);
 
 client.once('ready', async () => {
     console.log(`✅ Bot is online als ${client.user.tag}`);
+    console.log(`✅ Bot ID: ${client.user.id}`);
+    console.log(`✅ Aantal servers: ${client.guilds.cache.size}`);
 
     try {
+        console.log('🔄 Slash commands worden geregistreerd...');
         await rest.put(
             Routes.applicationCommands(CLIENT_ID),
             { body: commands.map(cmd => cmd.toJSON()) }
         );
-        console.log('✅ Slash commands geregistreerd!');
+        console.log('✅ Slash commands succesvol geregistreerd!');
     } catch (error) {
         console.error('❌ Fout bij registreren commands:', error);
     }
@@ -60,27 +73,33 @@ client.on('interactionCreate', async (interaction) => {
     const doorUser = interaction.options.getUser('door');
     const extra = interaction.options.getString('extra') || 'Geen extra informatie';
 
-    const member = interaction.guild.members.cache.get(user.id);
-    const doorMember = interaction.guild.members.cache.get(doorUser.id);
+    // Haal member op van de gebruiker
+    const member = await interaction.guild.members.fetch(user.id).catch(() => null);
+    const doorMember = await interaction.guild.members.fetch(doorUser.id).catch(() => null);
 
     if (!member) {
         return interaction.editReply('❌ Deze gebruiker is niet gevonden in de server.');
     }
 
-    // Check of de bot de rol kan toevoegen
-    const botMember = interaction.guild.members.cache.get(client.user.id);
+    if (!doorMember) {
+        return interaction.editReply('❌ De gebruiker die aangenomen heeft, is niet gevonden.');
+    }
+
+    // Controleer of de bot permissies heeft
+    const botMember = await interaction.guild.members.fetch(client.user.id);
     if (!botMember.permissions.has(PermissionsBitField.Flags.ManageRoles)) {
-        return interaction.editReply('❌ Ik heb geen Manage Roles permissie!');
+        return interaction.editReply('❌ Ik heb geen **Manage Roles** permissie! Geef mij deze permissie in de server instellingen.');
     }
 
+    // Controleer of de rol lager is dan de hoogste rol van de bot
     if (role.position >= botMember.roles.highest.position) {
-        return interaction.editReply('❌ Ik kan deze rol niet toevoegen omdat hij hoger is dan mijn hoogste rol.');
+        return interaction.editReply(`❌ Ik kan de rol **${role.name}** niet toevoegen omdat deze hoger of gelijk is aan mijn hoogste rol. Zet mijn rol hoger in de server.`);
     }
 
-    // Extra staff team rol (aanpassen naar jouw rol)
+    // Zoek de "Staff Team" rol (pas aan naar jouw rolnaam)
     const staffTeamRole = interaction.guild.roles.cache.find(r => r.name === 'Staff Team');
     if (!staffTeamRole) {
-        return interaction.editReply('❌ De rol "Staff Team" is niet gevonden. Maak deze eerst aan!');
+        return interaction.editReply('❌ De rol **"Staff Team"** is niet gevonden. Maak deze eerst aan in de server instellingen.');
     }
 
     try {
@@ -88,45 +107,54 @@ client.on('interactionCreate', async (interaction) => {
         await member.roles.add(role);
         console.log(`✅ Rol ${role.name} toegevoegd aan ${user.tag}`);
 
-        // Staff team rol toevoegen
+        // Staff team rol toevoegen (als die nog niet heeft)
         if (!member.roles.cache.has(staffTeamRole.id)) {
             await member.roles.add(staffTeamRole);
             console.log(`✅ Staff Team rol toegevoegd aan ${user.tag}`);
         }
 
-        // Embed maken voor het kanaal
+        // Embed maken voor mooie weergave
         const embed = new EmbedBuilder()
             .setColor(0x00FF00)
             .setTitle('✅ Aangenomen!')
-            .setDescription(`**${user.username}** is aangenomen!`)
-            .setThumbnail(user.displayAvatarURL({ dynamic: true }))
+            .setDescription(`**${user.username}** is succesvol aangenomen!`)
+            .setThumbnail(user.displayAvatarURL({ dynamic: true, size: 256 }))
             .addFields(
                 { name: '👤 Gebruiker', value: `${user}`, inline: true },
-                { name: '🎯 Rol', value: `${role}`, inline: true },
+                { name: '🎯 Toegekende rol', value: `${role}`, inline: true },
                 { name: '👔 Aangenomen door', value: `${doorUser}`, inline: true },
                 { name: '📝 Extra informatie', value: extra, inline: false }
             )
             .setTimestamp()
-            .setFooter({ text: `Aangenomen door ${interaction.user.tag}`, iconURL: interaction.user.displayAvatarURL() });
+            .setFooter({ 
+                text: `Aangenomen door ${interaction.user.tag}`, 
+                iconURL: interaction.user.displayAvatarURL() 
+            });
 
-        // Stuur naar het huidige kanaal
+        // Stuur embed naar het kanaal waar command gebruikt is
         await interaction.editReply({ embeds: [embed] });
 
-        // Optioneel: Log kanaal
+        // Optioneel: Stuur ook naar een specifiek log kanaal
         const logChannel = interaction.guild.channels.cache.find(ch => ch.name === 'aangenomen-logs');
         if (logChannel) {
             await logChannel.send({ embeds: [embed] });
+            console.log(`📨 Log verstuurd naar #${logChannel.name}`);
         }
 
     } catch (error) {
-        console.error('❌ Fout:', error);
-        await interaction.editReply('❌ Er is een fout opgetreden. Controleer of de rollen correct zijn ingesteld.');
+        console.error('❌ Fout bij toevoegen rollen:', error);
+        await interaction.editReply('❌ Er is een fout opgetreden. Controleer of de rollen correct zijn ingesteld en of ik voldoende permissies heb.');
     }
 });
 
-// Error handling
-process.on('unhandledRejection', error => {
+// Error handling voor betere debugging
+process.on('unhandledRejection', (error) => {
     console.error('❌ Unhandled rejection:', error);
 });
 
+process.on('uncaughtException', (error) => {
+    console.error('❌ Uncaught exception:', error);
+});
+
+// Login
 client.login(TOKEN);
