@@ -16,8 +16,10 @@ const client = new Client({
 const TOKEN = process.env.DISCORD_TOKEN;
 const STAFF_TEAM_ROLE_ID = process.env.STAFF_TEAM_ROLE_ID;
 
-// CLIENT_ID wordt automatisch bepaald na het opstarten
-let CLIENT_ID = process.env.CLIENT_ID || null;
+// HARDCODED CLIENT_ID (gebruik de juiste bot ID)
+const CLIENT_ID = '1546575102945001592'; // ← Dit is jouw bot ID
+
+console.log(`📋 Gebruikte CLIENT_ID: ${CLIENT_ID}`);
 
 // Controleer of token bestaat
 if (!TOKEN) {
@@ -51,6 +53,37 @@ const commands = [
 ];
 
 // ============================================
+// COMMANDS REGISTREREN (direct uitvoeren)
+// ============================================
+async function registerCommands() {
+    const rest = new REST({ version: '10' }).setToken(TOKEN);
+    
+    try {
+        console.log('🔄 Slash commands worden geregistreerd...');
+        console.log(`🔄 Gebruik Application ID: ${CLIENT_ID}`);
+        
+        await rest.put(
+            Routes.applicationCommands(CLIENT_ID),
+            { body: commands.map(cmd => cmd.toJSON()) }
+        );
+        console.log('✅ Slash commands succesvol geregistreerd!');
+        console.log('📋 Commands: /aangenomen');
+        return true;
+    } catch (error) {
+        console.error('❌ Fout bij registreren commands:');
+        console.error(`❌ Status: ${error.status}`);
+        console.error(`❌ Code: ${error.code}`);
+        console.error(`❌ Message: ${error.message}`);
+        
+        if (error.code === 10002) {
+            console.error('❌ Oplossing: De CLIENT_ID is incorrect!');
+            console.error(`❌ Gebruik deze ID: ${client.user ? client.user.id : 'onbekend'}`);
+        }
+        return false;
+    }
+}
+
+// ============================================
 // BOT STARTUP
 // ============================================
 client.once('ready', async () => {
@@ -58,33 +91,14 @@ client.once('ready', async () => {
     console.log(`✅ Bot ID: ${client.user.id}`);
     console.log(`✅ Aantal servers: ${client.guilds.cache.size}`);
     
-    // Automatisch de CLIENT_ID instellen op de bot ID
-    CLIENT_ID = client.user.id;
-    console.log(`✅ Gebruikte CLIENT_ID: ${CLIENT_ID}`);
-    
     if (STAFF_TEAM_ROLE_ID) {
         console.log(`✅ Staff Team Role ID geladen: ${STAFF_TEAM_ROLE_ID}`);
     } else {
         console.warn('⚠️ Geen Staff Team Role ID ingesteld in environment variables');
     }
 
-    // Registreer slash commands
-    const rest = new REST({ version: '10' }).setToken(TOKEN);
-    
-    try {
-        console.log('🔄 Slash commands worden geregistreerd...');
-        await rest.put(
-            Routes.applicationCommands(CLIENT_ID),
-            { body: commands.map(cmd => cmd.toJSON()) }
-        );
-        console.log('✅ Slash commands succesvol geregistreerd!');
-        console.log('📋 Commands: /aangenomen');
-    } catch (error) {
-        console.error('❌ Fout bij registreren commands:', error);
-        if (error.code === 10002) {
-            console.error('❌ Ongeldige CLIENT_ID. Controleer of de bot token correct is.');
-        }
-    }
+    // Registreer commands
+    await registerCommands();
 });
 
 // ============================================
