@@ -11,17 +11,16 @@ const client = new Client({
 
 const TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
-const STAFF_TEAM_ROLE_ID = process.env.STAFF_TEAM_ROLE_ID; // Nieuwe environment variable
+const STAFF_TEAM_ROLE_ID = process.env.STAFF_TEAM_ROLE_ID;
 
 // Controleer of alle environment variables bestaan
 if (!TOKEN || !CLIENT_ID) {
-    console.error('❌ DISCORD_TOKEN of CLIENT_ID is niet ingesteld in .env of Render environment variables!');
+    console.error('❌ DISCORD_TOKEN of CLIENT_ID is niet ingesteld!');
+    console.error(`CLIENT_ID: ${CLIENT_ID || 'niet ingesteld'}`);
     process.exit(1);
 }
 
-if (!STAFF_TEAM_ROLE_ID) {
-    console.warn('⚠️ STAFF_TEAM_ROLE_ID is niet ingesteld. De bot zal geen Staff Team rol toevoegen.');
-}
+console.log(`📋 Gebruikte CLIENT_ID: ${CLIENT_ID}`);
 
 // Slash command registreren
 const commands = [
@@ -51,8 +50,14 @@ const rest = new REST({ version: '10' }).setToken(TOKEN);
 
 client.once('ready', async () => {
     console.log(`✅ Bot is online als ${client.user.tag}`);
-    console.log(`✅ Bot ID: ${client.user.id}`);
+    console.log(`✅ Bot User ID: ${client.user.id}`);
     console.log(`✅ Aantal servers: ${client.guilds.cache.size}`);
+    
+    // Check of de CLIENT_ID overeenkomt met de bot ID
+    if (client.user.id !== CLIENT_ID) {
+        console.warn(`⚠️ CLIENT_ID (${CLIENT_ID}) komt niet overeen met Bot ID (${client.user.id})!`);
+        console.warn(`⚠️ Gebruik ${client.user.id} als CLIENT_ID in je environment variables.`);
+    }
     
     if (STAFF_TEAM_ROLE_ID) {
         console.log(`✅ Staff Team Role ID geladen: ${STAFF_TEAM_ROLE_ID}`);
@@ -62,13 +67,24 @@ client.once('ready', async () => {
 
     try {
         console.log('🔄 Slash commands worden geregistreerd...');
+        console.log(`🔄 Gebruik Application ID: ${CLIENT_ID}`);
+        
         await rest.put(
             Routes.applicationCommands(CLIENT_ID),
             { body: commands.map(cmd => cmd.toJSON()) }
         );
         console.log('✅ Slash commands succesvol geregistreerd!');
     } catch (error) {
-        console.error('❌ Fout bij registreren commands:', error);
+        console.error('❌ Fout bij registreren commands:');
+        console.error(`❌ Status: ${error.status}`);
+        console.error(`❌ Code: ${error.code}`);
+        console.error(`❌ Message: ${error.message}`);
+        
+        if (error.code === 10002) {
+            console.error('❌ Oplossing: De CLIENT_ID is incorrect!');
+            console.error(`❌ Gebruik deze ID: ${client.user.id}`);
+            console.error('❌ Update CLIENT_ID in je Render environment variables.');
+        }
     }
 });
 
@@ -84,7 +100,6 @@ client.on('interactionCreate', async (interaction) => {
     const doorUser = interaction.options.getUser('door');
     const extra = interaction.options.getString('extra') || 'Geen extra informatie';
 
-    // Haal member op van de gebruiker
     const member = await interaction.guild.members.fetch(user.id).catch(() => null);
     const doorMember = await interaction.guild.members.fetch(doorUser.id).catch(() => null);
 
@@ -96,46 +111,37 @@ client.on('interactionCreate', async (interaction) => {
         return interaction.editReply('❌ De gebruiker die aangenomen heeft, is niet gevonden.');
     }
 
-    // Controleer of de bot permissies heeft
     const botMember = await interaction.guild.members.fetch(client.user.id);
     if (!botMember.permissions.has(PermissionsBitField.Flags.ManageRoles)) {
-        return interaction.editReply('❌ Ik heb geen **Manage Roles** permissie! Geef mij deze permissie in de server instellingen.');
+        return interaction.editReply('❌ Ik heb geen **Manage Roles** permissie!');
     }
 
-    // Controleer of de rol lager is dan de hoogste rol van de bot
     if (role.position >= botMember.roles.highest.position) {
-        return interaction.editReply(`❌ Ik kan de rol **${role.name}** niet toevoegen omdat deze hoger of gelijk is aan mijn hoogste rol. Zet mijn rol hoger in de server.`);
+        return interaction.editReply(`❌ Ik kan de rol **${role.name}** niet toevoegen omdat deze hoger of gelijk is aan mijn hoogste rol.`);
     }
 
-    // Staff Team rol via environment variable
     let staffTeamRole = null;
     if (STAFF_TEAM_ROLE_ID) {
         staffTeamRole = interaction.guild.roles.cache.get(STAFF_TEAM_ROLE_ID);
         if (!staffTeamRole) {
-            return interaction.editReply(`❌ De Staff Team rol met ID \`${STAFF_TEAM_ROLE_ID}\` is niet gevonden. Controleer of het ID klopt.`);
+            return interaction.editReply(`❌ De Staff Team rol met ID \`${STAFF_TEAM_ROLE_ID}\` is niet gevonden.`);
         }
     } else {
-        // Fallback: zoek op naam als geen ID is ingesteld
         staffTeamRole = interaction.guild.roles.cache.find(r => r.name === 'Staff Team');
         if (!staffTeamRole) {
-            console.warn('⚠️ Staff Team rol niet gevonden op naam, en geen ID ingesteld in environment.');
+            console.warn('⚠️ Staff Team rol niet gevonden');
         }
     }
 
     try {
-        // Rol toevoegen aan gebruiker
         await member.roles.add(role);
         console.log(`✅ Rol ${role.name} toegevoegd aan ${user.tag}`);
 
-        // Staff team rol toevoegen (als die bestaat en gebruiker heeft hem nog niet)
         if (staffTeamRole && !member.roles.cache.has(staffTeamRole.id)) {
             await member.roles.add(staffTeamRole);
             console.log(`✅ Staff Team rol toegevoegd aan ${user.tag}`);
-        } else if (staffTeamRole && member.roles.cache.has(staffTeamRole.id)) {
-            console.log(`ℹ️ ${user.tag} heeft de Staff Team rol al.`);
         }
 
-        // Embed maken voor mooie weergave
         const embed = new EmbedBuilder()
             .setColor(0x00FF00)
             .setTitle('✅ Aangenomen!')
@@ -153,17 +159,8 @@ client.on('interactionCreate', async (interaction) => {
                 iconURL: interaction.user.displayAvatarURL() 
             });
 
-        // Als staff team rol is toegevoegd, voeg toe aan embed
-        if (staffTeamRole && !member.roles.cache.has(staffTeamRole.id)) {
-            embed.addFields(
-                { name: '🎖️ Extra rol', value: `**${staffTeamRole.name}** toegevoegd`, inline: false }
-            );
-        }
-
-        // Stuur embed naar het kanaal waar command gebruikt is
         await interaction.editReply({ embeds: [embed] });
 
-        // Optioneel: Stuur ook naar een specifiek log kanaal
         const logChannel = interaction.guild.channels.cache.find(ch => ch.name === 'aangenomen-logs');
         if (logChannel) {
             await logChannel.send({ embeds: [embed] });
@@ -172,11 +169,10 @@ client.on('interactionCreate', async (interaction) => {
 
     } catch (error) {
         console.error('❌ Fout bij toevoegen rollen:', error);
-        await interaction.editReply('❌ Er is een fout opgetreden. Controleer of de rollen correct zijn ingesteld en of ik voldoende permissies heb.');
+        await interaction.editReply('❌ Er is een fout opgetreden.');
     }
 });
 
-// Error handling voor betere debugging
 process.on('unhandledRejection', (error) => {
     console.error('❌ Unhandled rejection:', error);
 });
@@ -185,5 +181,4 @@ process.on('uncaughtException', (error) => {
     console.error('❌ Uncaught exception:', error);
 });
 
-// Login
 client.login(TOKEN);
