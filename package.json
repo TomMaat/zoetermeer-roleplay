@@ -1,14 +1,15 @@
 {
-  "name": "discord-bot",
+  "name": "zoetermeer-assistentie-bot",
   "version": "1.0.0",
-  "description": "Custom Discord bot met aangenomen command",
+  "description": "Custom Discord bot voor Zoetermeer Roleplay met aangenomen command",
   "main": "bot.js",
   "scripts": {
     "start": "node bot.js"
   },
   "dependencies": {
     "discord.js": "^14.14.1",
-    "dotenv": "^16.3.1"
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2"
   },
   "engines": {
     "node": ">=18.0.0"
